@@ -589,6 +589,7 @@ pub fn nv12_to_rgb<const COLORIMETRY: usize>(
     }
 }
 
+
 #[inline(never)]
 pub fn i420_to_bgra<const COLORIMETRY: usize, const REVERSED: bool>(
     width: usize,
@@ -665,6 +666,69 @@ pub fn i420_to_bgra<const COLORIMETRY: usize, const REVERSED: bool>(
                     fix_to_u8_sat(sy11 + sb, FIX6),
                     fix_to_u8_sat(sy11 + sg, FIX6),
                     fix_to_u8_sat(sy11 + sr, FIX6),
+                );
+            }
+        }
+    }
+}
+
+#[inline(never)]
+pub fn i422_to_bgra<const COLORIMETRY: usize, const REVERSED: bool>(
+    width: usize,
+    height: usize,
+    src_strides: (usize, usize, usize),
+    src_buffers: (&[u8], &[u8], &[u8]),
+    dst_stride: usize,
+    dst_buffer: &mut [u8],
+) {
+    const DEPTH: usize = 4;
+    let (y_stride, u_stride, v_stride) = src_strides;
+
+    let weights = &BACKWARD_WEIGHTS[COLORIMETRY];
+    let xxym = weights[0];
+    let rcrm = weights[1];
+    let gcrm = weights[2];
+    let gcbm = weights[3];
+    let bcbm = weights[4];
+    let rn = weights[5];
+    let gp = weights[6];
+    let bn = weights[7];
+
+    let wg_width = width / 2;
+    let wg_height = height;
+
+    unsafe {
+        let y_group = src_buffers.0.as_ptr();
+        let u_group = src_buffers.1.as_ptr();
+        let v_group = src_buffers.2.as_ptr();
+        let dst_group = dst_buffer.as_mut_ptr();
+
+        for y in 0..wg_height {
+            for x in 0..wg_width {
+                let cb = i32::from(*u_group.add(wg_index(x, y, 1, u_stride)));
+                let cr = i32::from(*v_group.add(wg_index(x, y, 1, v_stride)));
+
+                let sr = mulhi_i32(cr, rcrm) - rn;
+                let sg = -mulhi_i32(cb, gcbm) - mulhi_i32(cr, gcrm) + gp;
+                let sb = mulhi_i32(cb, bcbm) - bn;
+
+                let (y00, y10) = unpack_ui8x2_i32(y_group.add(wg_index(2 * x, y, 1, y_stride)));
+
+                let sy00 = mulhi_i32(y00, xxym);
+
+                pack_ui8x3::<REVERSED>(
+                    dst_group.add(wg_index(2 * x, y, DEPTH, dst_stride)),
+                    fix_to_u8_sat(sy00 + sb, FIX6),
+                    fix_to_u8_sat(sy00 + sg, FIX6),
+                    fix_to_u8_sat(sy00 + sr, FIX6),
+                );
+
+                let sy10 = mulhi_i32(y10, xxym);
+                pack_ui8x3::<REVERSED>(
+                    dst_group.add(wg_index(2 * x + 1, y, DEPTH, dst_stride)),
+                    fix_to_u8_sat(sy10 + sb, FIX6),
+                    fix_to_u8_sat(sy10 + sg, FIX6),
+                    fix_to_u8_sat(sy10 + sr, FIX6),
                 );
             }
         }
@@ -1148,6 +1212,62 @@ fn i420_rgb<const COLORIMETRY: usize, const DEPTH: usize, const REVERSED: bool>(
 }
 
 #[inline(never)]
+fn i422_rgb<const COLORIMETRY: usize, const DEPTH: usize, const REVERSED: bool>(
+    width: u32,
+    height: u32,
+    _last_src_plane: usize,
+    src_strides: &[usize],
+    src_buffers: &[&[u8]],
+    _last_dst_plane: usize,
+    dst_strides: &[usize],
+    dst_buffers: &mut [&mut [u8]],
+) -> bool {
+    // Degenerate case, trivially accept
+    if width == 0 || height == 0 {
+        return true;
+    }
+
+    // Check there are sufficient strides and buffers
+    if src_strides.len() < 3
+        || src_buffers.len() < 3
+        || dst_strides.is_empty()
+        || dst_buffers.is_empty()
+    {
+        return false;
+    }
+
+    // Check subsampling limits
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w / 2;
+    let rgb_stride = DEPTH * w;
+
+    // Compute actual strides
+    let src_strides = (
+        compute_stride(src_strides[0], w),
+        compute_stride(src_strides[1], cw),
+        compute_stride(src_strides[2], cw),
+    );
+    let dst_stride = compute_stride(dst_strides[0], rgb_stride);
+
+    // Ensure there is sufficient data in the buffers according
+    // to the image dimensions and computed strides
+    let src_buffers = (src_buffers[0], src_buffers[1], src_buffers[2]);
+    let dst_buffer = &mut *dst_buffers[0];
+    if out_of_bounds(src_buffers.0.len(), src_strides.0, h - 1, w)
+        || out_of_bounds(src_buffers.1.len(), src_strides.1, h - 1, cw)
+        || out_of_bounds(src_buffers.2.len(), src_strides.2, h - 1, cw)
+        || out_of_bounds(dst_buffer.len(), dst_stride, h - 1, rgb_stride)
+    {
+        return false;
+    }
+
+    i422_to_bgra::<COLORIMETRY, REVERSED>(w, h, src_strides, src_buffers, dst_stride, dst_buffer);
+
+    true
+}
+
+#[inline(never)]
 fn i444_rgb<const COLORIMETRY: usize, const DEPTH: usize, const REVERSED: bool>(
     width: u32,
     height: u32,
@@ -1444,6 +1564,14 @@ yuv_to_rgb_converter!(I420, Bt709, Bgra);
 yuv_to_rgb_converter!(I420, Bt709, Rgba);
 yuv_to_rgb_converter!(I420, Bt709FR, Bgra);
 yuv_to_rgb_converter!(I420, Bt709FR, Rgba);
+yuv_to_rgb_converter!(I422, Bt601, Bgra);
+yuv_to_rgb_converter!(I422, Bt601, Rgba);
+yuv_to_rgb_converter!(I422, Bt601FR, Bgra);
+yuv_to_rgb_converter!(I422, Bt601FR, Rgba);
+yuv_to_rgb_converter!(I422, Bt709, Bgra);
+yuv_to_rgb_converter!(I422, Bt709, Rgba);
+yuv_to_rgb_converter!(I422, Bt709FR, Bgra);
+yuv_to_rgb_converter!(I422, Bt709FR, Rgba);
 yuv_to_rgb_converter!(I444, Bt601, Bgra);
 yuv_to_rgb_converter!(I444, Bt601, Rgba);
 yuv_to_rgb_converter!(I444, Bt601FR, Bgra);

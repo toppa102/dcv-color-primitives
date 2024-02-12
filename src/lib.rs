@@ -481,6 +481,14 @@ macro_rules! set_dispatch_table {
         yuv_to_rgb!($conv, $set, I420, Bt709, Rgba);
         yuv_to_rgb!($conv, $set, I420, Bt709FR, Bgra);
         yuv_to_rgb!($conv, $set, I420, Bt709FR, Rgba);
+        yuv_to_rgb!($conv, $set, I422, Bt601, Bgra);
+        yuv_to_rgb!($conv, $set, I422, Bt601, Rgba);
+        yuv_to_rgb!($conv, $set, I422, Bt601FR, Bgra);
+        yuv_to_rgb!($conv, $set, I422, Bt601FR, Rgba);
+        yuv_to_rgb!($conv, $set, I422, Bt709, Bgra);
+        yuv_to_rgb!($conv, $set, I422, Bt709, Rgba);
+        yuv_to_rgb!($conv, $set, I422, Bt709FR, Bgra);
+        yuv_to_rgb!($conv, $set, I422, Bt709FR, Rgba);
         yuv_to_rgb!($conv, $set, I444, Bt601, Bgra);
         yuv_to_rgb!($conv, $set, I444, Bt601, Rgba);
         yuv_to_rgb!($conv, $set, I444, Bt601FR, Bgra);
