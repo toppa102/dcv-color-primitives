@@ -589,7 +589,6 @@ pub fn nv12_to_rgb<const COLORIMETRY: usize>(
     }
 }
 
-
 #[inline(never)]
 pub fn i420_to_bgra<const COLORIMETRY: usize, const REVERSED: bool>(
     width: usize,
